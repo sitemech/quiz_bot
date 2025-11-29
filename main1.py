@@ -8,12 +8,12 @@ import json
 import os
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
-from config import TOKEN
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-telebot.logger.setLevel(logging.INFO)
 
+# Токен бота
+TOKEN = '7636938358:AAG6JZehslEU2hMKyVDYSS94CTNd4OHsM6c'
 CHAT_IDS = set()
 NOTIFICATIONS_ENABLED = True
 bot = telebot.TeleBot(TOKEN, threaded=False)
@@ -42,10 +42,6 @@ months = {
 }
 
 URL = "https://ufa.quizplease.ru/schedule?QpGameSearch%5BcityId%5D=6&QpGameSearch%5Bdates%5D=&QpGameSearch%5Bformat%5D%5B%5D=all&QpGameSearch%5Btype%5D%5B%5D=1"
-REQUEST_HEADERS = {
-    # Using a browser-like UA helps the site avoid showing a bot/captcha page
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-}
 
 def save_subscribers():
     try:
@@ -71,15 +67,6 @@ def load_subscribers():
 def get_today():
     return DEBUG_DATE.date() if DEBUG_DATE else datetime.today().date()
 
-
-def log_message(message, label="msg"):
-    """Логируем входящее сообщение/команду для отладки."""
-    try:
-        user = message.from_user
-        logging.info(f"{label} from {user.id} (@{user.username}): {message.text}")
-    except Exception:
-        logging.info(f"{label}: {message}")
-
 def format_date_label(date_obj):
     today = get_today()
     if date_obj.date() == today:
@@ -94,26 +81,18 @@ def parse_date(date_str):
     day, month_name = date_part.split(" ")
     day = int(day)
     month = months[month_name.lower()]
-    today = get_today()
-    year = today.year
-    # If the parsed month already прошел в текущем году, относим дату к следующему году
-    if month < today.month or (month == today.month and day < today.day):
-        year += 1
-    return datetime(year, month, day)
+    date_str_formatted = f"{day:02d}-{month:02d}-2025"
+    date_obj = datetime.strptime(date_str_formatted, "%d-%m-%Y")
+    return date_obj
 
 def fetch_quiz_schedule():
     logging.info("Запрос расписания квизов")
-    response = requests.get(URL, headers=REQUEST_HEADERS, timeout=15)
-    response.raise_for_status()
+    response = requests.get(URL)
     soup = BeautifulSoup(response.text, 'html.parser')
     quizzes = []
 
-    columns = soup.find_all('div', class_='schedule-column')
-    if not columns:
-        logging.warning("Не удалось найти блоки с расписанием (возможно, страница защиты от ботов)")
-
-    for quiz in columns:
-        date_text = quiz.find('div', class_=lambda x: x and 'block-date-with-language-game' in x).text.strip()
+    for quiz in soup.find_all('div', class_='schedule-block available'):
+        date_text = quiz.find('div', class_='h3 h3-green h3-mb10 block-date-with-language-game game-active').text.strip()
         date = parse_date(date_text)
 
         name = quiz.find('div', class_='h2 h2-game-card h2-left').text.strip()
@@ -187,28 +166,21 @@ def send_daily_notification():
 
 @bot.message_handler(commands=['start', 'subscribe'])
 def subscribe(message):
-    log_message(message, label="/start|/subscribe")
     CHAT_IDS.add(message.chat.id)
     save_subscribers()
     logging.info(f"Пользователь {message.chat.id} подписан")
-    bot.send_message(message.chat.id, "Подписка оформлена. Ищу ближайший квиз...")
-    try:
-        next_quiz = get_next_quiz()
-        if next_quiz:
-            day_label = format_date_label(next_quiz[0])
-            bot.send_message(message.chat.id,
-                             f"🎲 Следующий квиз: {next_quiz[1]} ({day_label} — {next_quiz[0].strftime('%d.%m.%Y')})\n"
-                             f"⏰ Время: {next_quiz[4]}\n"
-                             f"📍 Место: {next_quiz[2]}, {next_quiz[3]}\n")
-        else:
-            bot.send_message(message.chat.id, "Сегодня и завтра квизов нет. Уведомлю за сутки до ближайшего.")
-    except Exception as e:
-        logging.error(f"Ошибка при получении ближайшего квиза: {e}")
-        bot.send_message(message.chat.id, "Не удалось получить расписание. Попробуйте позже или команду /next.")
+    next_quiz = get_next_quiz()
+    if next_quiz:
+        day_label = format_date_label(next_quiz[0])
+        bot.send_message(message.chat.id,
+                         f"🎲 Следующий квиз: {next_quiz[1]} ({day_label} — {next_quiz[0].strftime('%d.%m.%Y')})\n"
+                         f"⏰ Время: {next_quiz[4]}\n"
+                         f"📍 Место: {next_quiz[2]}, {next_quiz[3]}\n")
+    else:
+        bot.send_message(message.chat.id, "Сегодня и завтра квизов пока нет, но я уведомлю вас за сутки.")
 
 @bot.message_handler(commands=['pause'])
 def pause_notifications(message):
-    log_message(message, label="/pause")
     global NOTIFICATIONS_ENABLED
     NOTIFICATIONS_ENABLED = False
     logging.info(f"Пользователь {message.chat.id} приостановил уведомления")
@@ -216,35 +188,10 @@ def pause_notifications(message):
 
 @bot.message_handler(commands=['resume'])
 def resume_notifications(message):
-    log_message(message, label="/resume")
     global NOTIFICATIONS_ENABLED
     NOTIFICATIONS_ENABLED = True
     logging.info(f"Пользователь {message.chat.id} возобновил уведомления")
     bot.send_message(message.chat.id, "Уведомления возобновлены.")
-
-@bot.message_handler(commands=['next'])
-def send_next_quiz(message):
-    log_message(message, label="/next")
-    bot.send_message(message.chat.id, "Проверяю расписание...")
-    try:
-        next_quiz = get_next_quiz()
-        if next_quiz:
-            day_label = format_date_label(next_quiz[0])
-            bot.send_message(message.chat.id,
-                             f"🎲 Следующий квиз: {next_quiz[1]} ({day_label} — {next_quiz[0].strftime('%d.%m.%Y')})\n"
-                             f"⏰ Время: {next_quiz[4]}\n"
-                             f"📍 Место: {next_quiz[2]}, {next_quiz[3]}\n")
-        else:
-            bot.send_message(message.chat.id, "Ближайших квизов в расписании нет.")
-    except Exception as e:
-        logging.error(f"Ошибка при обработке /next: {e}")
-        bot.send_message(message.chat.id, "Не удалось получить расписание. Попробуйте позже.")
-
-
-@bot.message_handler(func=lambda m: True, content_types=['text'])
-def catch_all(message):
-    log_message(message, label="text")
-    bot.send_message(message.chat.id, "Команда не распознана. Используйте /next, /start, /pause или /resume.")
 
 def scheduler_debug():
     while True:
@@ -252,7 +199,7 @@ def scheduler_debug():
         time.sleep(10)
 
 def scheduler_production():
-    schedule.every().day.at("05:00").do(send_daily_notification)
+    schedule.every().day.at("07:00").do(send_daily_notification)
     while True:
         schedule.run_pending()
         time.sleep(1)
@@ -267,12 +214,7 @@ def main():
         threading.Thread(target=scheduler_production, daemon=True).start()
 
     logging.info("Запуск бота")
-    logging.info("Переходим в режим polling...")
-    try:
-        bot.infinity_polling(timeout=60, long_polling_timeout=30, skip_pending=True, allowed_updates=telebot.util.update_types)
-    except Exception as e:
-        logging.exception(f"Polling упал с ошибкой: {e}")
-        raise
+    bot.infinity_polling()
 
 if __name__ == '__main__':
     main()
