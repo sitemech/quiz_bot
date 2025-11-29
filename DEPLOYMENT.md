@@ -21,6 +21,7 @@ sudo apt install python3 python3-pip -y
 cd /path/to/NestQuiz
 pip3 install -r requirements.txt
 ```
+**Примечание:** На сервере используется Python 3.8.20. Убедитесь, что версии библиотек в `requirements.txt` совместимы с этой версией Python. Например, `pyTelegramBotAPI==4.26.0` требует Python 3.9+, что может вызвать проблемы.
 
 ## Настройка бота
 
@@ -48,102 +49,44 @@ source ~/.bashrc
 
 ## Запуск
 
-### Вариант 1: Запуск в фоне (screen)
+### Запуск через Supervisor (рекомендуется)
 
-```bash
-# Установка screen (если не установлен)
-sudo apt install screen -y
+1.  Установите Supervisor (если не установлен):
+    ```bash
+    sudo apt install supervisor -y
+    ```
+2.  Создайте файл конфигурации для вашего бота, например, `/etc/supervisor/conf.d/quiz_bot.conf`:
+    ```ini
+    [program:quiz_bot]
+    directory=/home/ubuntu/quiz_bot
+    command=/home/ubuntu/quiz_bot/quiz_bot_env/bin/python main.py
+    autostart=true
+    autorestart=true
+    stderr_logfile=/var/log/quiz_bot.err.log
+    stdout_logfile=/var/log/quiz_bot.out.log
+    user=ubuntu
+    environment=PATH="/home/ubuntu/quiz_bot/quiz_bot_env/bin"
+    ```
+    **Важно:** Убедитесь, что пути (`directory`, `command`, `environment`) и имя файла запуска (`main.py`) соответствуют вашему проекту.
 
-# Создание сессии
-screen -S nestquiz
-
-# Запуск бота
-cd /path/to/NestQuiz
-python3 main.py
-
-# Отсоединение: Ctrl+A, затем D
-# Подключение: screen -r nestquiz
-```
-
-### Вариант 2: Systemd сервис (рекомендуется)
-
-1. Создайте файл `/etc/systemd/system/nestquiz.service`:
-
-```ini
-[Unit]
-Description=NestQuiz Telegram Bot
-After=network.target
-
-[Service]
-Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu/NestQuiz
-Environment="BOT_TOKEN=ваш_токен_здесь"
-ExecStart=/usr/bin/python3 /home/ubuntu/NestQuiz/main.py
-Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-```
-
-2. Замените пути на актуальные:
-   - `WorkingDirectory` - путь к проекту
-   - `ExecStart` - полный путь к main.py
-   - `BOT_TOKEN` - ваш токен
-
-3. Запуск сервиса:
-
-```bash
-# Перезагрузка systemd
-sudo systemctl daemon-reload
-
-# Включение автозапуска
-sudo systemctl enable nestquiz
-
-# Запуск сервиса
-sudo systemctl start nestquiz
-
-# Проверка статуса
-sudo systemctl status nestquiz
-
-# Просмотр логов
-sudo journalctl -u nestquiz -f
-```
-
-### Вариант 3: Запуск в фоне (nohup)
-
-```bash
-cd /path/to/NestQuiz
-nohup python3 main.py > bot.log 2>&1 &
-```
-
-Проверка:
-```bash
-ps aux | grep main.py
-tail -f bot.log
-```
+3.  Перезагрузите Supervisor, чтобы применить изменения:
+    ```bash
+    sudo supervisorctl reread
+    sudo supervisorctl update
+    ```
+4.  Запустите или перезапустите сервис:
+    ```bash
+    sudo supervisorctl restart quiz_bot
+    ```
 
 ## Мониторинг
 
 ### Просмотр логов
 
-**Systemd:**
+**Supervisor:**
 ```bash
-sudo journalctl -u nestquiz -f
-sudo journalctl -u nestquiz --since "1 hour ago"
-```
-
-**Screen:**
-```bash
-screen -r nestquiz
-```
-
-**Nohup:**
-```bash
-tail -f bot.log
+sudo cat /var/log/quiz_bot.out.log -f
+sudo cat /var/log/quiz_bot.err.log -f
 ```
 
 ### Проверка работы бота
@@ -154,74 +97,66 @@ tail -f bot.log
 
 ### Перезапуск
 
-**Systemd:**
+**Supervisor:**
 ```bash
-sudo systemctl restart nestquiz
-```
-
-**Screen:**
-```bash
-screen -r nestquiz
-# Ctrl+C для остановки
-python3 main.py  # для запуска
-```
-
-**Nohup:**
-```bash
-pkill -f main.py
-nohup python3 main.py > bot.log 2>&1 &
+sudo supervisorctl restart quiz_bot
 ```
 
 ## Обновление
 
 ### Обновление кода
 
-```bash
-cd /path/to/NestQuiz
-git pull  # если используете git
-# или загрузите новые файлы
-
-# Перезапуск
-sudo systemctl restart nestquiz
-```
-
-### Обновление зависимостей
-
-```bash
-pip3 install -r requirements.txt --upgrade
-sudo systemctl restart nestquiz
-```
+1.  Подключитесь к серверу по SSH.
+2.  Перейдите в директорию проекта:
+    ```bash
+    cd /home/ubuntu/quiz_bot # Замените на актуальный путь
+    ```
+3.  Выполните `git pull` для получения последних изменений (если используете Git):
+    ```bash
+    git pull
+    ```
+    Если текущая ветка не отслеживает удаленную, сначала установите отслеживание:
+    ```bash
+    git branch --set-upstream-to=origin/main main # Предполагается, что основная ветка называется main
+    git pull
+    ```
+    или загрузите новые файлы вручную.
+4.  Обновите зависимости (если необходимо):
+    ```bash
+    source quiz_bot_env/bin/activate # Активируйте виртуальное окружение
+    pip3 install -r requirements.txt --upgrade
+    ```
+5.  Перезапустите сервис через Supervisor:
+    ```bash
+    sudo supervisorctl restart quiz_bot
+    ```
 
 ## Устранение проблем
 
 ### Бот не отвечает
 
-1. Проверьте статус:
-```bash
-sudo systemctl status nestquiz
-```
-
-2. Проверьте логи:
-```bash
-sudo journalctl -u nestquiz -n 50
-```
-
+1. Проверьте статус Supervisor:
+   ```bash
+   sudo supervisorctl status
+   ```
+2. Проверьте логи Supervisor:
+   ```bash
+   sudo cat /var/log/quiz_bot.out.log
+   sudo cat /var/log/quiz_bot.err.log
+   ```
 3. Проверьте токен в `config.py`
-
 4. Проверьте доступность интернета:
-```bash
-ping api.telegram.org
-```
+   ```bash
+   ping api.telegram.org
+   ```
 
 ### Ошибки парсинга
 
 1. Проверьте доступность сайта:
-```bash
-curl https://ufa.quizplease.ru/schedule
-```
-
+   ```bash
+   curl https://ufa.quizplease.ru/schedule
+   ```
 2. Проверьте логи на ошибки парсинга
-
 3. Возможно, изменилась структура HTML сайта
 
 ### Проблемы с правами доступа
@@ -308,6 +243,6 @@ top -p $(pgrep -f main.py)
 
 ---
 
-**Версия:** 1.0  
+**Версия:** 1.1 (Обновлено)
 **Дата:** 2025-11-29
 
