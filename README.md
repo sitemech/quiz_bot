@@ -37,7 +37,7 @@ pip install -r requirements.txt
 
 4. Запустите бота:
 ```bash
-python main2.py
+python main.py
 ```
 
 ## 📖 Команды бота
@@ -55,7 +55,7 @@ python main2.py
 
 ```
 NestQuiz/
-├── main2.py          # Основной файл бота
+├── main.py           # Основной файл бота
 ├── config.py         # Конфигурация (токен бота)
 ├── subscribers.json  # База данных подписчиков
 ├── requirements.txt  # Зависимости проекта
@@ -90,7 +90,7 @@ NestQuiz/
 
 ## ⚙️ Конфигурация
 
-### Переменные в `main2.py`
+### Переменные в `main.py`
 
 ```python
 DEBUG = False  # Режим отладки (True = уведомления каждые 10 сек)
@@ -155,7 +155,7 @@ schedule==1.2.2           # Планировщик задач
 ### Локальный запуск
 
 ```bash
-python main2.py
+python main.py
 ```
 
 ### Запуск на сервере (systemd)
@@ -172,7 +172,7 @@ Type=simple
 User=ubuntu
 WorkingDirectory=/path/to/NestQuiz
 Environment="BOT_TOKEN=your_token_here"
-ExecStart=/usr/bin/python3 /path/to/NestQuiz/main2.py
+ExecStart=/usr/bin/python3 /path/to/NestQuiz/main.py
 Restart=always
 RestartSec=10
 
@@ -191,7 +191,7 @@ sudo systemctl status nestquiz
 
 ```bash
 screen -S nestquiz
-python main2.py
+python main.py
 # Ctrl+A, затем D для отсоединения
 ```
 
@@ -215,13 +215,13 @@ __pycache__/
 
 ## 🐛 Известные проблемы и ограничения
 
-1. **Парсинг дат**: Используется фиксированный год (2025) в некоторых версиях. В `main2.py` это исправлено.
-2. **Защита от ботов**: Сайт может блокировать запросы. В `main2.py` добавлен User-Agent.
+1. **Парсинг дат**: Используется фиксированный год (2025) в некоторых версиях. В `main.py` это исправлено.
+2. **Защита от ботов**: Сайт может блокировать запросы. В `main.py` добавлен User-Agent.
 3. **Структура HTML**: При изменении структуры сайта может потребоваться обновление парсера.
 
 ## 📝 Основной файл
 
-**main2.py** - основной файл бота со всеми функциями:
+**main.py** - основной файл бота со всеми функциями:
 - Использует `config.py` для токена
 - Улучшенная обработка ошибок
 - User-Agent для обхода блокировок

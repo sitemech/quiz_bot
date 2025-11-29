@@ -59,7 +59,7 @@ screen -S nestquiz
 
 # Запуск бота
 cd /path/to/NestQuiz
-python3 main2.py
+python3 main.py
 
 # Отсоединение: Ctrl+A, затем D
 # Подключение: screen -r nestquiz
@@ -79,7 +79,7 @@ Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/NestQuiz
 Environment="BOT_TOKEN=ваш_токен_здесь"
-ExecStart=/usr/bin/python3 /home/ubuntu/NestQuiz/main2.py
+ExecStart=/usr/bin/python3 /home/ubuntu/NestQuiz/main.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -91,7 +91,7 @@ WantedBy=multi-user.target
 
 2. Замените пути на актуальные:
    - `WorkingDirectory` - путь к проекту
-   - `ExecStart` - полный путь к main2.py
+   - `ExecStart` - полный путь к main.py
    - `BOT_TOKEN` - ваш токен
 
 3. Запуск сервиса:
@@ -117,12 +117,12 @@ sudo journalctl -u nestquiz -f
 
 ```bash
 cd /path/to/NestQuiz
-nohup python3 main2.py > bot.log 2>&1 &
+nohup python3 main.py > bot.log 2>&1 &
 ```
 
 Проверка:
 ```bash
-ps aux | grep main2.py
+ps aux | grep main.py
 tail -f bot.log
 ```
 
@@ -163,13 +163,13 @@ sudo systemctl restart nestquiz
 ```bash
 screen -r nestquiz
 # Ctrl+C для остановки
-python3 main2.py  # для запуска
+python3 main.py  # для запуска
 ```
 
 **Nohup:**
 ```bash
-pkill -f main2.py
-nohup python3 main2.py > bot.log 2>&1 &
+pkill -f main.py
+nohup python3 main.py > bot.log 2>&1 &
 ```
 
 ## Обновление
@@ -229,7 +229,7 @@ curl https://ufa.quizplease.ru/schedule
 ```bash
 # Убедитесь, что у пользователя есть права на файлы
 chmod 644 config.py
-chmod 644 main2.py
+chmod 644 main.py
 chmod 666 subscribers.json  # для записи
 ```
 
@@ -263,7 +263,7 @@ sudo apt update && sudo apt upgrade -y
 
 - `subscribers.json` - список подписчиков
 - `config.py` - конфигурация (если не используете env)
-- `main2.py` - основной код
+- `main.py` - основной код
 
 ### Автоматический бэкап (cron)
 
@@ -292,10 +292,10 @@ crontab -e
 
 ```bash
 # Использование памяти
-ps aux | grep main2.py
+ps aux | grep main.py
 
 # Использование CPU
-top -p $(pgrep -f main2.py)
+top -p $(pgrep -f main.py)
 ```
 
 ### Оптимизация
