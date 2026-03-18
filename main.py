@@ -41,11 +41,14 @@ months = {
     "декабря": 12
 }
 
-URL = "https://ufa.quizplease.ru/schedule?QpGameSearch%5BcityId%5D=6&QpGameSearch%5Bdates%5D=&QpGameSearch%5Bformat%5D%5B%5D=all&QpGameSearch%5Btype%5D%5B%5D=1"
+URL = "https://ufa.quizplease.ru/schedule?statuses[]=0&statuses[]=1&statuses[]=2&statuses[]=3&game_types[]=1&game_types[]=2&game_types[]=6&game_types[]=8"
 REQUEST_HEADERS = {
     # Using a browser-like UA helps the site avoid showing a bot/captcha page
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
+
+SCHEDULE_CITY_ID = 3  # Уфа в API Quiz, плиз!
+API_BASE_URL = "https://api.quizplease.com/"
 
 def save_subscribers():
     try:
@@ -101,26 +104,87 @@ def parse_date(date_str):
         year += 1
     return datetime(year, month, day)
 
+def parse_api_game_datetime(date_str: str) -> datetime:
+    """
+    API отдаёт дату в формате 'DD.MM.YYYY HH:MM' (например '18.03.2026 19:30').
+    Иногда время может отсутствовать — тогда пробуем 'DD.MM.YYYY'.
+    """
+    date_str = (date_str or "").strip()
+    for fmt in ("%d.%m.%Y %H:%M", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(date_str, fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"Не удалось распарсить дату игры из API: {date_str!r}")
+
+def html_to_text(value: str) -> str:
+    """Аккуратно превращает HTML/текст в читаемый plain text."""
+    if not value:
+        return ""
+    return BeautifulSoup(value, "html.parser").get_text("\n").strip()
+
 def fetch_quiz_schedule():
     logging.info("Запрос расписания квизов")
-    response = requests.get(URL, headers=REQUEST_HEADERS, timeout=15)
-    response.raise_for_status()
-    soup = BeautifulSoup(response.text, 'html.parser')
     quizzes = []
 
-    columns = soup.find_all('div', class_='schedule-column')
+    # Новая версия сайта рендерит расписание на клиенте (Nuxt), поэтому парсинг HTML ломается.
+    # Берём данные напрямую из публичного API, который использует сайт.
+    api_url = f"{API_BASE_URL}api/games/schedule/{SCHEDULE_CITY_ID}"
+    params = {
+        "per_page": 50,
+        "order": "date",
+        "meta[]": ["places_ids", "dates"],
+        "statuses[]": ["0", "1", "2", "3", "5"],
+        "game_types[]": ["1", "2", "6", "8"],
+    }
+
+    try:
+        response = requests.get(api_url, headers=REQUEST_HEADERS, params=params, timeout=20)
+        response.raise_for_status()
+        payload = response.json()
+        games = (payload.get("data") or {}).get("data") or []
+
+        for game in games:
+            date = parse_api_game_datetime(game.get("date"))
+            name = (game.get("title") or "").strip()
+
+            place = game.get("place") or {}
+            venue_name = (place.get("title") or "").strip()
+            address = (place.get("address") or place.get("address_ru") or "").strip()
+
+            time_ = date.strftime("%H:%M")
+            description = html_to_text(game.get("description") or "")
+
+            quizzes.append((date, name, venue_name, address, time_, description))
+
+        logging.info(f"Найдено квизов (API): {len(quizzes)}")
+        return quizzes
+    except Exception as e:
+        logging.warning(f"API-парсинг расписания не удался, пробую HTML: {e}")
+
+    # Fallback на старую HTML-верстку (на случай временных проблем с API)
+    response = requests.get(URL, headers=REQUEST_HEADERS, timeout=20)
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    columns = soup.find_all("div", class_="schedule-column")
     if not columns:
-        logging.warning("Не удалось найти блоки с расписанием (возможно, страница защиты от ботов)")
+        logging.warning("Не удалось найти блоки с расписанием в HTML (верстка/защита от ботов)")
+        return []
 
     for quiz in columns:
-        date_text = quiz.find('div', class_=lambda x: x and 'block-date-with-language-game' in x).text.strip()
+        date_node = quiz.find("div", class_=lambda x: x and "block-date-with-language-game" in x)
+        name_node = quiz.find("div", class_="h2 h2-game-card h2-left")
+        place_block = quiz.find("div", class_="techtext techtext-halfwhite")
+
+        if not (date_node and name_node and place_block):
+            continue
+
+        date_text = date_node.text.strip()
         date = parse_date(date_text)
+        name = name_node.text.strip()
 
-        name = quiz.find('div', class_='h2 h2-game-card h2-left').text.strip()
-
-        place_block = quiz.find('div', class_='techtext techtext-halfwhite')
         place_text = place_block.text.strip().replace("Где это?", "").replace("\n", " ").strip()
-
         parts = place_text.split(",")
         if len(parts) >= 2:
             venue_name = parts[0].strip()
@@ -129,15 +193,15 @@ def fetch_quiz_schedule():
             venue_name = place_text
             address = ""
 
-        elements = quiz.find_all('div', class_='schedule-info')
+        elements = quiz.find_all("div", class_="schedule-info")
         time_ = elements[1].text.strip() if len(elements) > 1 else ""
 
-        desc_block = quiz.find('div', class_='techtext techtext-mb30')
+        desc_block = quiz.find("div", class_="techtext techtext-mb30")
         description = desc_block.text.strip() if desc_block else ""
 
         quizzes.append((date, name, venue_name, address, time_, description))
 
-    logging.info(f"Найдено квизов: {len(quizzes)}")
+    logging.info(f"Найдено квизов (HTML fallback): {len(quizzes)}")
     return quizzes
 
 def get_today_and_tomorrow_quizzes():
@@ -154,27 +218,32 @@ def get_next_quiz():
     future_quizzes = sorted([q for q in quizzes if q[0].date() >= today], key=lambda x: x[0])
     return future_quizzes[0] if future_quizzes else None
 
+def format_upcoming_quizzes_message():
+    """Формирует сообщение о ближайших квизах на сегодня и завтра с описаниями."""
+    upcoming_quizzes = get_today_and_tomorrow_quizzes()
+    filtered_quizzes = [q for q in upcoming_quizzes if "[новички]" not in q[1].lower()]
+
+    if filtered_quizzes:
+        lines = []
+        for q in filtered_quizzes:
+            day_label = format_date_label(q[0])
+            quiz_info = (
+                f"🎲 {q[1]} ({day_label} — {q[0].strftime('%d.%m.%Y')})\n"
+                f"⏰ Время: {q[4]}\n"
+                f"📍 Место: {q[2]}, {q[3]}\n"
+            )
+            # Добавляем описание для каждого квиза, если оно есть
+            if q[5]:  # q[5] - это описание
+                quiz_info += f"📝 Описание игры:\n{q[5]}\n"
+            lines.append(quiz_info)
+        return "📅 Ближайшие квизы:\n\n" + "\n\n".join(lines)
+    else:
+        return "Сегодня и завтра подходящих квизов нет. Я уведомлю вас за сутки."
+
 def send_daily_notification():
     logging.info("Проверка необходимости отправки уведомлений")
     if NOTIFICATIONS_ENABLED and CHAT_IDS:
-        upcoming_quizzes = get_today_and_tomorrow_quizzes()
-        filtered_quizzes = [q for q in upcoming_quizzes if "[новички]" not in q[1].lower()]
-
-        if filtered_quizzes:
-            lines = []
-            for q in filtered_quizzes:
-                day_label = format_date_label(q[0])
-                lines.append(
-                    f"🎲 {q[1]} ({day_label} — {q[0].strftime('%d.%m.%Y')})\n"
-                    f"⏰ Время: {q[4]}\n"
-                    f"📍 Место: {q[2]}, {q[3]}\n"
-                )
-            game_description = filtered_quizzes[0][5] if filtered_quizzes[0][5] else ""
-            if game_description:
-                lines.append(f"📝 Описание игры:\n{game_description}")
-            message = "📅 Ближайшие квизы:\n\n" + "\n\n".join(lines)
-        else:
-            message = "Сегодня и завтра подходящих квизов нет. Я уведомлю вас за сутки."
+        message = format_upcoming_quizzes_message()
 
         for chat_id in CHAT_IDS:
             try:
@@ -191,19 +260,12 @@ def subscribe(message):
     CHAT_IDS.add(message.chat.id)
     save_subscribers()
     logging.info(f"Пользователь {message.chat.id} подписан")
-    bot.send_message(message.chat.id, "Подписка оформлена. Ищу ближайший квиз...")
+    bot.send_message(message.chat.id, "Подписка оформлена. Ищу ближайшие квизы...")
     try:
-        next_quiz = get_next_quiz()
-        if next_quiz:
-            day_label = format_date_label(next_quiz[0])
-            bot.send_message(message.chat.id,
-                             f"🎲 Следующий квиз: {next_quiz[1]} ({day_label} — {next_quiz[0].strftime('%d.%m.%Y')})\n"
-                             f"⏰ Время: {next_quiz[4]}\n"
-                             f"📍 Место: {next_quiz[2]}, {next_quiz[3]}\n")
-        else:
-            bot.send_message(message.chat.id, "Сегодня и завтра квизов нет. Уведомлю за сутки до ближайшего.")
+        message_text = format_upcoming_quizzes_message()
+        bot.send_message(message.chat.id, message_text)
     except Exception as e:
-        logging.error(f"Ошибка при получении ближайшего квиза: {e}")
+        logging.error(f"Ошибка при получении ближайших квизов: {e}")
         bot.send_message(message.chat.id, "Не удалось получить расписание. Попробуйте позже или команду /next.")
 
 @bot.message_handler(commands=['pause'])
